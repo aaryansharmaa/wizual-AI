@@ -17,7 +17,7 @@ import { formUrlQuery } from "@/lib/utils";
 
 import { Button } from "../ui/button";
 
-import { Search } from "@/components/shared/Search";
+import { Search } from "./Search";
 
 export const Collection = ({
   hasSearch = false,
@@ -112,16 +112,6 @@ const Card = ({ image }: { image: IImage }) => {
           <p className="p-20-semibold mr-3 line-clamp-1 text-dark-600">
             {image.title}
           </p>
-          <Image
-            src={`/assets/icons/${
-              transformationTypes[
-                image.transformationType as TransformationTypeKey
-              ].icon
-            }`}
-            alt={image.title}
-            width={24}
-            height={24}
-          />
         </div>
       </Link>
     </li>

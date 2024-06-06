@@ -33,6 +33,7 @@ import { CustomField } from "./CustomField";
 import { useEffect, useState, useTransition } from "react";
 import { AspectRatioKey, debounce, deepMergeObjects } from "@/lib/utils";
 import MediaUploader from "./MediaUploader";
+import TransformedImage from "./TransformedImage";
 import { updateCredits } from "@/lib/actions/user.actions";
 import { getCldImageUrl } from "next-cloudinary";
 import { addImage, updateImage } from "@/lib/actions/image.actions";
@@ -57,11 +58,14 @@ const TransformationForm = ({
 }: TransformationFormProps) => {
   const transformationType = transformationTypes[type];
   const [image, setImage] = useState(data);
+  const [transformedImage, setTransformedImage] = useState(null); // Separate state for transformed image
   const [newTransformation, setNewTransformation] =
     useState<Transformations | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTransforming, setIsTransforming] = useState(false);
-  const [transformationConfig, setTransformationConfig] = useState(config);
+  const [transformationConfig, setTransformationConfig] = useState(
+    config || {}
+  );
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
 
@@ -99,7 +103,7 @@ const TransformationForm = ({
         publicId: image?.publicId,
         transformation: type,
         width: image?.width,
-        height: image?.height,
+        height: image?.height, // Ensure height is included
         config: transformationConfig,
         secureURL: image?.secureURL,
         transformationURL: transformationUrl,
@@ -159,7 +163,7 @@ const TransformationForm = ({
       ...prevState,
       aspectRatio: imageSize.aspectRatio,
       width: imageSize.width,
-      height: imageSize.height,
+      height: imageSize.height, // Ensure height is set correctly
     }));
 
     setNewTransformation(transformationType.config);
@@ -189,22 +193,37 @@ const TransformationForm = ({
   const onTransformHandler = async () => {
     setIsTransforming(true);
 
-    setTransformationConfig(
-      deepMergeObjects(newTransformation, transformationConfig)
+    const updatedConfig = deepMergeObjects(
+      newTransformation,
+      transformationConfig
     );
-
-    setNewTransformation(null);
+    setTransformationConfig(updatedConfig);
 
     startTransition(async () => {
       await updateCredits(userId, creditFee);
+      // Update the transformed image state after transformation
+      setTransformedImage({
+        ...image,
+        transformationURL: getCldImageUrl({
+          width: image?.width,
+          height: image?.height,
+          src: image?.publicId,
+          ...updatedConfig,
+        }),
+      });
     });
+
+    setIsTransforming(false);
+    setNewTransformation(null);
   };
 
   useEffect(() => {
     if (image && (type === "restore" || type === "removeBackground")) {
-      setNewTransformation(transformationType.config);
+      if (transformationType && transformationType.config) {
+        setNewTransformation(transformationType.config);
+      }
     }
-  }, [image, transformationType.config, type]);
+  }, [image, transformationType, type]);
 
   return (
     <Form {...form}>
@@ -310,6 +329,15 @@ const TransformationForm = ({
                 type={type}
               />
             )}
+          />
+
+          <TransformedImage
+            image={transformedImage} // Use the transformed image state
+            type={type}
+            title={form.getValues().title}
+            isTransforming={isTransforming}
+            setIsTransforming={setIsTransforming}
+            transformationConfig={transformationConfig}
           />
         </div>
 
