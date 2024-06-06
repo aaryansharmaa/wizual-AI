@@ -1,5 +1,7 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { z } from "zod";
 
 import {
@@ -9,8 +11,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-import { aspectRatioOptions, transformationTypes } from "@/constants";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,19 +23,24 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
-import { defaultValues } from "@/constants";
+import {
+  aspectRatioOptions,
+  creditFee,
+  defaultValues,
+  transformationTypes,
+} from "@/constants";
 import { CustomField } from "./CustomField";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { AspectRatioKey, debounce, deepMergeObjects } from "@/lib/utils";
-import { updateCredits } from "@/lib/actions/user.actions";
 import MediaUploader from "./MediaUploader";
-import TransformImage from "./TransformImage";
+import { updateCredits } from "@/lib/actions/user.actions";
+import { getCldImageUrl } from "next-cloudinary";
+import { addImage, updateImage } from "@/lib/actions/image.actions";
+import { useRouter } from "next/navigation";
+import { InsufficientCreditsModal } from "./InsufficientCreditsModal";
 
 export const formSchema = z.object({
-  title: z.string().min(2).max(50),
+  title: z.string(),
   aspectRatio: z.string().optional(),
   color: z.string().optional(),
   prompt: z.string().optional(),
@@ -43,8 +48,8 @@ export const formSchema = z.object({
 });
 
 const TransformationForm = ({
-  data,
   action,
+  data = null,
   userId,
   type,
   creditBalance,
@@ -54,12 +59,12 @@ const TransformationForm = ({
   const [image, setImage] = useState(data);
   const [newTransformation, setNewTransformation] =
     useState<Transformations | null>(null);
-
-  const [isSubmiting, setIsSubmiting] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isTransforming, setIsTransforming] = useState(false);
   const [transformationConfig, setTransformationConfig] = useState(config);
-
   const [isPending, startTransition] = useTransition();
+  const router = useRouter();
+
   const initialValues =
     data && action === "Update"
       ? {
@@ -71,13 +76,77 @@ const TransformationForm = ({
         }
       : defaultValues;
 
+  // 1. Define your form.
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: initialValues,
   });
 
-  function onSubmit(values: z.infer<typeof formSchema>) {
-    console.log(values);
+  // 2. Define a submit handler.
+  async function onSubmit(values: z.infer<typeof formSchema>) {
+    setIsSubmitting(true);
+
+    if (data || image) {
+      const transformationUrl = getCldImageUrl({
+        width: image?.width,
+        height: image?.height,
+        src: image?.publicId,
+        ...transformationConfig,
+      });
+
+      const imageData = {
+        title: values.title,
+        publicId: image?.publicId,
+        transformation: type,
+        width: image?.width,
+        height: image?.height,
+        config: transformationConfig,
+        secureURL: image?.secureURL,
+        transformationURL: transformationUrl,
+        aspectRatio: values.aspectRatio,
+        prompt: values.prompt,
+        color: values.color,
+      };
+
+      if (action === "Add") {
+        try {
+          const newImage = await addImage({
+            image: imageData,
+            userId,
+            path: "/",
+          });
+
+          if (newImage) {
+            form.reset();
+            setImage(data);
+            router.push(`/transformations/${newImage._id}`);
+          }
+        } catch (error) {
+          console.log(error);
+        }
+      }
+
+      if (action === "Update") {
+        try {
+          const updatedImage = await updateImage({
+            image: {
+              ...imageData,
+              _id: data._id,
+            },
+            userId,
+            path: `/transformations/${data._id}`,
+          });
+
+          if (updatedImage) {
+            router.push(`/transformations/${updatedImage._id}`);
+          }
+        } catch (error) {
+          console.log(error);
+        }
+      }
+    }
+
+    setIsSubmitting(false);
   }
 
   const onSelectFieldHandler = (
@@ -112,11 +181,11 @@ const TransformationForm = ({
           [fieldName === "prompt" ? "prompt" : "to"]: value,
         },
       }));
+    }, 1000)();
 
-      onChangeField(value);
-    }, 1000);
+    return onChangeField(value);
   };
-  //todo: credits
+
   const onTransformHandler = async () => {
     setIsTransforming(true);
 
@@ -127,13 +196,20 @@ const TransformationForm = ({
     setNewTransformation(null);
 
     startTransition(async () => {
-      await updateCredits(userId, -1);
+      await updateCredits(userId, creditFee);
     });
   };
+
+  useEffect(() => {
+    if (image && (type === "restore" || type === "removeBackground")) {
+      setNewTransformation(transformationType.config);
+    }
+  }, [image, transformationType.config, type]);
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
+        {creditBalance < Math.abs(creditFee) && <InsufficientCreditsModal />}
         <CustomField
           control={form.control}
           name="title"
@@ -141,6 +217,7 @@ const TransformationForm = ({
           className="w-full"
           render={({ field }) => <Input {...field} className="input-field" />}
         />
+
         {type === "fill" && (
           <CustomField
             control={form.control}
@@ -152,9 +229,10 @@ const TransformationForm = ({
                 onValueChange={(value) =>
                   onSelectFieldHandler(value, field.onChange)
                 }
+                value={field.value}
               >
                 <SelectTrigger className="select-field">
-                  <SelectValue placeholder="Select Size" />
+                  <SelectValue placeholder="Select size" />
                 </SelectTrigger>
                 <SelectContent>
                   {Object.keys(aspectRatioOptions).map((key) => (
@@ -169,7 +247,7 @@ const TransformationForm = ({
         )}
 
         {(type === "remove" || type === "recolor") && (
-          <div className="promptfield">
+          <div className="prompt-field">
             <CustomField
               control={form.control}
               name="prompt"
@@ -198,7 +276,7 @@ const TransformationForm = ({
                 control={form.control}
                 name="color"
                 formLabel="Replacement Color"
-                className="w-full mt-4"
+                className="w-full"
                 render={({ field }) => (
                   <Input
                     value={field.value}
@@ -227,19 +305,11 @@ const TransformationForm = ({
               <MediaUploader
                 onValueChange={field.onChange}
                 setImage={setImage}
-                image={image}
                 publicId={field.value}
+                image={image}
                 type={type}
               />
             )}
-          />
-          <TransformImage
-            image={image}
-            type={type}
-            title={form.getValues().title}
-            isTransforming={isTransforming}
-            setIsTransforming={setIsTransforming}
-            transformationConfig={transformationConfig}
           />
         </div>
 
@@ -250,14 +320,14 @@ const TransformationForm = ({
             disabled={isTransforming || newTransformation === null}
             onClick={onTransformHandler}
           >
-            {isTransforming ? "Transforming..." : "Apply transformation"}
+            {isTransforming ? "Transforming..." : "Apply Transformation"}
           </Button>
           <Button
             type="submit"
             className="submit-button capitalize"
-            disabled={isSubmiting}
+            disabled={isSubmitting}
           >
-            {isSubmiting ? "Submitting" : "Save Image"}
+            {isSubmitting ? "Submitting..." : "Save Image"}
           </Button>
         </div>
       </form>
