@@ -42,8 +42,8 @@ declare type UpdateImageParams = {
     title: string;
     publicId: string;
     transformation: string;
-    width: number;
-    height: number;
+    width?: number;
+    height?: number;
     config: any;
     secureURL: string;
     transformationURL: string;

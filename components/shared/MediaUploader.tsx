@@ -27,7 +27,8 @@ const MediaUploader = ({
     setImage((prevState: any) => ({
       ...prevState,
       publicId: result?.info?.public_id,
-      width: result?.info?.height,
+      width: result?.info?.width,
+      height: result?.info?.height,
       secureURL: result?.info?.secure_url,
     }));
 
